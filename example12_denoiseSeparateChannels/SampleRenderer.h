@@ -59,10 +59,8 @@ namespace osc {
     /*! set camera to render with */
     void setCamera(const Camera &camera);
 
-    /* 添加方块 */
-    OptixTraversableHandle updateAccel();
-
-    bool denoiserOn = true;
+    
+    bool denoiserOn = false;
     bool accumulate = true;
   protected:
 
@@ -138,16 +136,6 @@ namespace osc {
     std::vector<OptixProgramGroup> hitgroupPGs;
     CUDABuffer hitgroupRecordsBuffer;
     OptixShaderBindingTable sbt = {};
-
-    /* 方块数量 */
-    int cubeNums = 0;
-
-    /* buildinput所需参数设置为SampleRenderer的成员变量，以便之后进行update */
-    std::vector<OptixBuildInput> triangleInput;
-    std::vector<CUdeviceptr> d_vertices;
-    std::vector<CUdeviceptr> d_indices;
-    std::vector<uint32_t> triangleInputFlags;
-    CUDABuffer outputBuffer;
 
     /*! @{ our launch parameters, on the host, and the buffer to store
         them on the device */

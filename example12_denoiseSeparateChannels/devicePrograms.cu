@@ -22,7 +22,8 @@
 
 using namespace osc;
 
-#define NUM_LIGHT_SAMPLES 4
+#define NUM_LIGHT_SAMPLES 1//光源个数
+#define NUM_RANDOM_SAMPLES 1
 
 namespace osc {
 
@@ -39,8 +40,11 @@ namespace osc {
     Random random;
     vec3f  pixelColor;
     vec3f  pixelNormal;
-    vec3f  pixelAlbedo;
-  };
+    vec3f  pixelAlbedo;//漫反射系数
+	vec3f feedback;
+	bool hit;
+	int bounce;
+  };//像素的属性
   
   static __forceinline__ __device__
   void *unpackPointer( uint32_t i0, uint32_t i1 )
@@ -75,6 +79,79 @@ namespace osc {
   // create a single, dummy, set of them (we do have to have at least
   // one group of them to set up the SBT)
   //------------------------------------------------------------------------------
+
+
+  extern "C" __constant__ float PI = 3.1415926;
+  extern "C" __constant__ float default_F0 = 0.04;
+  extern "C" __constant__ float default_alpha = 0.5;
+  static __forceinline__ __device__
+	 vec3f  half_vector(vec3f view, vec3f light){
+	  vec3f half = gdt::normalize(view + light);
+	  return half;
+  }
+  static __forceinline__ __device__
+	  vec3f specialmatch(vec3f a, vec3f b) {
+	  vec3f output;
+	  output.x = a.x * b.x;
+	  output.y = a.y * b.y;
+	  output.z = a.z * b.z;
+	  return output;
+  }
+  static __forceinline__ __device__
+	float NDF(vec3f normal, vec3f half, float alpha){
+	  float a2 = alpha * alpha;
+	  float NdotH = gdt::dot(normal, half);
+	  if (NdotH < 0.0) NdotH = 0.0;
+	  float NdotH2 = NdotH * NdotH;
+	  float nom = a2;
+	  float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+	  denom = PI * denom * denom;
+	  return nom / denom;
+  }
+  static __forceinline__ __device__
+	float GeometrySchlickGGX(float NdotV, float k){
+	  float nom = NdotV;
+	  float denom = NdotV * (1.0 - k) + k;
+	  return nom / denom;
+  }
+  static __forceinline__ __device__
+	  float K_IBL(float alpha) {
+	  float k = alpha * alpha / 2;
+	  return k;
+  }
+  static __forceinline__ __device__
+	float GeometrySmith(vec3f normal, vec3f view, vec3f light, float alpha){
+	  float k = K_IBL(alpha);
+	  float NdotV = gdt::dot(normal, view);
+	  if(NdotV < 0.0) NdotV = 0.0;
+	  float NdotL = gdt::dot(normal, light);
+	  if(NdotL < 0.0) NdotL = 0.0;
+	  float ggx1 = GeometrySchlickGGX(NdotV, k);
+	  float ggx2 = GeometrySchlickGGX(NdotL, k);
+	  return ggx1 * ggx2;
+  }
+  static __forceinline__ __device__
+	vec3f fresnelSchlick(vec3f half, vec3f view, vec3f F0){
+	  float HdotV = gdt::dot(half, view);
+	  return F0 + (vec3f(1.0) - F0) * (float)pow(1.0 - HdotV, 5.0);
+  }
+  static __forceinline__ __device__
+	 vec3f BRDF(vec3f view, vec3f light, vec3f normal, vec3f F0, float alpha, vec3f color, vec3f kd, vec3f ks) {
+	  vec3f v = gdt::normalize(view);
+	  vec3f l = gdt::normalize(light);
+	  vec3f n = gdt::normalize(normal);
+	  vec3f h = half_vector(v, l);
+	  vec3f former = specialmatch(color, kd) / PI;
+	  float D = NDF(n, h, alpha);
+	  float G = GeometrySmith(n, v, l, alpha);
+	  vec3f F = fresnelSchlick(h, v, F0);
+	  float VdotN = gdt::dot(v, n);
+	  float LdotN = gdt::dot(l, n);
+	  vec3f latter = specialmatch(D * G * F, ks) / (4 * VdotN * LdotN);
+	  return former + latter;
+  }
+
+
   
   extern "C" __global__ void __closesthit__shadow()
   {
@@ -85,7 +162,7 @@ namespace osc {
   {
     const TriangleMeshSBTData &sbtData
       = *(const TriangleMeshSBTData*)optixGetSbtDataPointer();
-    PRD &prd = *getPRD<PRD>();
+    PRD &former_prd = *getPRD<PRD>();
 
     // ------------------------------------------------------------------
     // gather some basic hit information
@@ -94,6 +171,13 @@ namespace osc {
     const vec3i index  = sbtData.index[primID];
     const float u = optixGetTriangleBarycentrics().x;
     const float v = optixGetTriangleBarycentrics().y;
+
+
+	vec3f Kd;
+	if(sbtData.Kd == vec3f(0.0)) Kd = vec3f(1.0);
+	else Kd = sbtData.Kd;
+	const vec3f Ks = sbtData.Ks;
+
 
     // ------------------------------------------------------------------
     // compute normal, using either shading normal (if avail), or
@@ -123,7 +207,7 @@ namespace osc {
 
     // ------------------------------------------------------------------
     // compute diffuse material color, including diffuse texture, if
-    // available
+    // available（计算物体本身的反射光颜色）
     // ------------------------------------------------------------------
     vec3f diffuseColor = sbtData.color;
     if (sbtData.hasTexture && sbtData.texcoord) {
@@ -137,7 +221,7 @@ namespace osc {
     }
 
     // start with some ambient term
-    vec3f pixelColor = (0.1f + 0.2f*fabsf(dot(Ns,rayDir)))*diffuseColor;
+	vec3f dirlight = 0.f;//(0.1f + 0.2f*fabsf(dot(Ns,rayDir)))*diffuseColor;//像素颜色
     
     // ------------------------------------------------------------------
     // compute shadow
@@ -146,18 +230,21 @@ namespace osc {
       = (1.f-u-v) * sbtData.vertex[index.x]
       +         u * sbtData.vertex[index.y]
       +         v * sbtData.vertex[index.z];
-
+	const vec3f view = gdt::normalize(optixLaunchParams.camera.position - surfPos);
     const int numLightSamples = NUM_LIGHT_SAMPLES;
     for (int lightSampleID=0;lightSampleID<numLightSamples;lightSampleID++) {
-      // produce random light sample
+      // produce random light sample（随机生成采样）
       const vec3f lightPos
         = optixLaunchParams.light.origin
-        + prd.random() * optixLaunchParams.light.du
-        + prd.random() * optixLaunchParams.light.dv;
+        + former_prd.random() * optixLaunchParams.light.du
+        + former_prd.random() * optixLaunchParams.light.dv;
       vec3f lightDir = lightPos - surfPos;
       float lightDist = gdt::length(lightDir);
       lightDir = normalize(lightDir);
-    
+	  const float area = gdt::length(gdt::cross(optixLaunchParams.light.du, optixLaunchParams.light.dv));
+	  const vec3f Nl = gdt::normalize(gdt::cross(optixLaunchParams.light.du, optixLaunchParams.light.dv));
+	  const float NldotL = fabs(gdt::dot(Nl, lightDir));
+	  vec3f fr = 1.0f;// BRDF(view, lightDir, Ns, vec3f(default_F0), default_alpha, diffuseColor, Kd, Ks);
       // trace shadow ray:
       const float NdotL = dot(lightDir,Ns);
       if (NdotL >= 0.f) {
@@ -180,23 +267,65 @@ namespace osc {
                    | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
                    SHADOW_RAY_TYPE,            // SBT offset
                    RAY_TYPE_COUNT,               // SBT stride
-                   SHADOW_RAY_TYPE,            // missSBTIndex 
+				   SHADOW_RAY_TYPE,            // missSBTIndex 
                    u0, u1 );
-        pixelColor
+        dirlight
           += lightVisibility
           *  optixLaunchParams.light.power
-          *  diffuseColor
-          *  (NdotL / (lightDist*lightDist*numLightSamples));
+          *  specialmatch(diffuseColor, fr)
+          *  (NdotL * NldotL * area / (lightDist*lightDist*numLightSamples));
       }
     }
-
-    prd.pixelNormal = Ns;
-    prd.pixelAlbedo = diffuseColor;
-    prd.pixelColor = pixelColor;
+	const int numRandomSample = NUM_RANDOM_SAMPLES;
+	vec3f indirlight = 0.f;
+	PRD my_prd;
+	my_prd.bounce = former_prd.bounce + 1;
+	my_prd.random = former_prd.random;
+	uint32_t u0, u1;
+	packPointer(&my_prd, u0, u1);
+	const float distance = gdt::length(optixLaunchParams.light.origin - surfPos);
+	for (int randomSampleID = 0; randomSampleID < numRandomSample; randomSampleID++) {
+		vec3f random_reflect_dir = 0.f;
+		while (gdt::dot(random_reflect_dir, Ns) <= 0.0f) {
+			random_reflect_dir.x = my_prd.random();
+			random_reflect_dir.y = my_prd.random();
+			random_reflect_dir.z = my_prd.random();
+		}
+		vec3f lightDir = normalize(random_reflect_dir);
+		optixTrace(optixLaunchParams.traversable,
+			surfPos + 1e-3f * Ng,
+			lightDir,
+			1e-3f,      // tmin
+			distance * (1.f - 1e-3f),
+			0.0f,       // rayTime
+			OptixVisibilityMask(255),
+			OPTIX_RAY_FLAG_NONE | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT | OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT,
+			RADIANCE_RAY_TYPE,            // SBT offset
+			RAY_TYPE_COUNT,               // SBT stride
+			RADIANCE_RAY_TYPE,            // missSBTIndex 
+			u0, u1);
+		if (my_prd.hit) {
+			const float NdotL = gdt::dot(Ns, lightDir);
+			vec3f fr = 1.0f;//BRDF(view, lightDir, Ns, vec3f(default_F0), default_alpha, diffuseColor, Kd, Ks);
+			indirlight += specialmatch(fr, my_prd.feedback) * NdotL / numRandomSample;
+		}
+	}
+	vec3f pixelColor = dirlight + indirlight;
+	if (former_prd.bounce == 0) {
+		former_prd.pixelNormal = Ns;
+		former_prd.pixelAlbedo = diffuseColor;
+		former_prd.pixelColor = pixelColor;
+	}
+	else {
+		former_prd.hit = true;
+		former_prd.feedback = pixelColor;
+	}
   }
   
-  extern "C" __global__ void __anyhit__radiance()
-  { /*! for this simple example, this will remain empty */ }
+  extern "C" __global__ void __anyhit__radiance(){
+	  PRD &prd = *getPRD<PRD>();
+	  if (prd.random() * 2.0f <= (float)prd.bounce) optixTerminateRay();
+  }
 
   extern "C" __global__ void __anyhit__shadow()
   { /*! not going to be used */ }
@@ -212,8 +341,12 @@ namespace osc {
   extern "C" __global__ void __miss__radiance()
   {
     PRD &prd = *getPRD<PRD>();
-    // set to constant white as background color
-    prd.pixelColor = vec3f(1.f);
+	if (prd.bounce == 0) {
+		prd.pixelColor = vec3f(1.f);
+	}
+	else {
+		prd.hit = false;
+	}
   }
 
   extern "C" __global__ void __miss__shadow()
@@ -237,12 +370,14 @@ namespace osc {
     prd.random.init(ix+optixLaunchParams.frame.size.x*iy,
                     optixLaunchParams.frame.frameID);
     prd.pixelColor = vec3f(0.f);
+	prd.bounce = 0;
+
 
     // the values we store the PRD pointer in:
     uint32_t u0, u1;
     packPointer( &prd, u0, u1 );
 
-    int numPixelSamples = optixLaunchParams.numPixelSamples;
+    int numPixelSamples = optixLaunchParams.numPixelSamples;//暂时为1
 
     vec3f pixelColor = 0.f;
     vec3f pixelNormal = 0.f;
@@ -277,7 +412,7 @@ namespace osc {
                  1e20f,  // tmax
                  0.0f,   // rayTime
                  OptixVisibilityMask( 255 ),
-                 OPTIX_RAY_FLAG_DISABLE_ANYHIT,//OPTIX_RAY_FLAG_NONE,
+				 OPTIX_RAY_FLAG_NONE,
                  RADIANCE_RAY_TYPE,            // SBT offset
                  RAY_TYPE_COUNT,               // SBT stride
                  RADIANCE_RAY_TYPE,            // missSBTIndex 
