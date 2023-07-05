@@ -16,6 +16,7 @@
 
 #include "GLFWindow.h"
 
+
 /*! \namespace osc - Optix Siggraph Course */
 namespace osc {
   using namespace gdt;
@@ -93,19 +94,25 @@ namespace osc {
   }
   int nframe = 0;
   double  curtime = 0, lasttime = 0;
-  void ShowFrameRate(GLFWwindow* window)
+  void ShowFrameRate(GLFWwindow* window, CameraFrame* cameraFrame)
   {
       char s[100] = { 0 };
       curtime = glfwGetTime();
       double delta = curtime - lasttime;
       nframe++;
-
-      //vec3f pos = curCameraFrame->get_from();
-      //printf("%d %d %d\n", pos.x, pos.y, pos.z);
+      
       
       if (delta>=1.0) {
-          sprintf(s, "final_project  FPS:%4.2f",
-              double(nframe)/delta);
+          if (cameraFrame != nullptr) {
+              vec3f pos = cameraFrame->get_from();
+              sprintf(s, "final_project  FPS:%4.2f from:[%.2f, %.2f, %.2f]",
+                  double(nframe) / delta, pos.x, pos.y, pos.z);
+          }
+          else {
+              sprintf(s, "final_project  FPS:%4.2f",
+                  double(nframe) / delta);
+          }
+          
           
           //printf("帧率为：%f\n", double(nframe) / delta);
           glfwSetWindowTitle(window, s);
@@ -130,10 +137,30 @@ namespace osc {
     while (!glfwWindowShouldClose(handle)) {
       render();
       draw();
-      ShowFrameRate(handle);//显示帧率
+      ShowFrameRate(handle, nullptr);//显示帧率
       glfwSwapBuffers(handle);
       glfwPollEvents();
     }
+  }
+
+  void GLFWindow::run_1(CameraFrame* cameraFrame) {//重写该函数
+      int width, height;
+      glfwGetFramebufferSize(handle, &width, &height);
+      resize(vec2i(width, height));
+
+      // glfwSetWindowUserPointer(window, GLFWindow::current);
+      glfwSetFramebufferSizeCallback(handle, glfwindow_reshape_cb);
+      glfwSetMouseButtonCallback(handle, glfwindow_mouseButton_cb);
+      glfwSetKeyCallback(handle, glfwindow_key_cb);
+      glfwSetCursorPosCallback(handle, glfwindow_mouseMotion_cb);
+
+      while (!glfwWindowShouldClose(handle)) {
+          render();
+          draw();
+          ShowFrameRate(handle, cameraFrame);//显示帧率
+          glfwSwapBuffers(handle);
+          glfwPollEvents();
+      }
   }
 
   // GLFWindow *GLFWindow::current = nullptr;

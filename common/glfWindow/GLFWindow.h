@@ -33,6 +33,103 @@ namespace osc {
       char B;
   };
 
+
+  struct CameraFrame {
+      CameraFrame(const float worldScale)
+          : motionSpeed(worldScale)
+      {
+      }
+
+      vec3f getPOI() const
+      {
+          return position - poiDistance * frame.vz;
+      }
+
+      /*! re-compute all orientation related fields from given
+        'user-style' camera parameters */
+      void setOrientation(/* camera origin    : */const vec3f& origin,
+          /* point of interest: */const vec3f& interest,
+          /* up-vector        : */const vec3f& up)
+      {
+          position = origin;
+          upVector = up;
+          frame.vz
+              = (interest == origin)
+              ? vec3f(0, 0, 1)
+              : /* negative because we use NEGATIZE z axis */ -normalize(interest - origin);
+          frame.vx = cross(up, frame.vz);
+          if (dot(frame.vx, frame.vx) < 1e-8f)
+              frame.vx = vec3f(0, 1, 0);
+          else
+              frame.vx = normalize(frame.vx);
+          // frame.vx
+          //   = (fabs(dot(up,frame.vz)) < 1e-6f)
+          //   ? vec3f(0,1,0)
+          //   : normalize(cross(up,frame.vz));
+          frame.vy = normalize(cross(frame.vz, frame.vx));
+          poiDistance = length(interest - origin);
+          forceUpFrame();
+      }
+
+      /*! tilt the frame around the z axis such that the y axis is "facing upwards" */
+      void forceUpFrame()
+      {
+          // frame.vz remains unchanged
+          if (fabsf(dot(frame.vz, upVector)) < 1e-6f)
+              // looking along upvector; not much we can do here ...
+              return;
+          frame.vx = normalize(cross(upVector, frame.vz));
+          frame.vy = normalize(cross(frame.vz, frame.vx));
+          modified = true;
+      }
+
+      void setUpVector(const vec3f& up)
+      {
+          upVector = up; forceUpFrame();
+      }
+
+      inline float computeStableEpsilon(float f) const
+      {
+          return abs(f) * float(1. / (1 << 21));
+      }
+
+      inline float computeStableEpsilon(const vec3f v) const
+      {
+          return max(max(computeStableEpsilon(v.x),
+              computeStableEpsilon(v.y)),
+              computeStableEpsilon(v.z));
+      }
+
+      inline vec3f get_from() const { return position; }
+      inline vec3f get_at() const { return getPOI(); }
+      inline vec3f get_up() const { return upVector; }
+
+      linear3f      frame{ one };
+      vec3f         position{ 0,-1,0 };
+      /*! distance to the 'point of interst' (poi); e.g., the point we
+        will rotate around */
+      float         poiDistance{ 1.f };
+      vec3f         upVector{ 0,1,0 };
+      /* if set to true, any change to the frame will always use to
+         upVector to 'force' the frame back upwards; if set to false,
+         the upVector will be ignored */
+      bool          forceUp{ true };
+
+      /*! multiplier how fast the camera should move in world space
+        for each unit of "user specifeid motion" (ie, pixel
+        count). Initial value typically should depend on the world
+        size, but can also be adjusted. This is actually something
+        that should be more part of the manipulator widget(s), but
+        since that same value is shared by multiple such widgets
+        it's easiest to attach it to the camera here ...*/
+      float         motionSpeed{ 1.f };
+
+      /*! gets set to true every time a manipulator changes the camera
+        values */
+      bool          modified{ true };
+  };
+
+
   struct GLFWindow {
     GLFWindow(const std::string &title);
     ~GLFWindow();
@@ -74,104 +171,12 @@ namespace osc {
       completion. This function will only return once the window
       gets closed */
     void run();
+    void run_1(CameraFrame* cameraFrame);
 
     /*! the glfw window handle */
     GLFWwindow *handle { nullptr };
   };
 
-
-  struct CameraFrame {
-    CameraFrame(const float worldScale)
-      : motionSpeed(worldScale)
-    {
-    }
-    
-    vec3f getPOI() const
-    { 
-      return position - poiDistance * frame.vz;
-    }
-      
-    /*! re-compute all orientation related fields from given
-      'user-style' camera parameters */
-    void setOrientation(/* camera origin    : */const vec3f &origin,
-                        /* point of interest: */const vec3f &interest,
-                        /* up-vector        : */const vec3f &up)
-    {
-      position = origin;
-      upVector = up;
-      frame.vz
-        = (interest==origin)
-        ? vec3f(0,0,1)
-        : /* negative because we use NEGATIZE z axis */ - normalize(interest - origin);
-      frame.vx = cross(up,frame.vz);
-      if (dot(frame.vx,frame.vx) < 1e-8f)
-        frame.vx = vec3f(0,1,0);
-      else
-        frame.vx = normalize(frame.vx);
-      // frame.vx
-      //   = (fabs(dot(up,frame.vz)) < 1e-6f)
-      //   ? vec3f(0,1,0)
-      //   : normalize(cross(up,frame.vz));
-      frame.vy = normalize(cross(frame.vz,frame.vx));
-      poiDistance = length(interest-origin);
-      forceUpFrame();
-    }
-      
-    /*! tilt the frame around the z axis such that the y axis is "facing upwards" */
-    void forceUpFrame()
-    {
-      // frame.vz remains unchanged
-      if (fabsf(dot(frame.vz,upVector)) < 1e-6f)
-        // looking along upvector; not much we can do here ...
-        return;
-      frame.vx = normalize(cross(upVector,frame.vz));
-      frame.vy = normalize(cross(frame.vz,frame.vx));
-      modified = true;
-    }
-
-    void setUpVector(const vec3f &up)
-    { upVector = up; forceUpFrame(); }
-
-    inline float computeStableEpsilon(float f) const
-    {
-      return abs(f) * float(1./(1<<21));
-    }
-                               
-    inline float computeStableEpsilon(const vec3f v) const
-    {
-      return max(max(computeStableEpsilon(v.x),
-                     computeStableEpsilon(v.y)),
-                 computeStableEpsilon(v.z));
-    }
-
-    inline vec3f get_from() const { return position; }
-    inline vec3f get_at() const { return getPOI(); }
-    inline vec3f get_up() const { return upVector; }
-      
-    linear3f      frame         { one };
-    vec3f         position      { 0,-1,0 };
-    /*! distance to the 'point of interst' (poi); e.g., the point we
-      will rotate around */
-    float         poiDistance   { 1.f };
-    vec3f         upVector      { 0,1,0 };
-    /* if set to true, any change to the frame will always use to
-       upVector to 'force' the frame back upwards; if set to false,
-       the upVector will be ignored */
-    bool          forceUp       { true };
-
-    /*! multiplier how fast the camera should move in world space
-      for each unit of "user specifeid motion" (ie, pixel
-      count). Initial value typically should depend on the world
-      size, but can also be adjusted. This is actually something
-      that should be more part of the manipulator widget(s), but
-      since that same value is shared by multiple such widgets
-      it's easiest to attach it to the camera here ...*/
-    float         motionSpeed   { 1.f };
-    
-    /*! gets set to true every time a manipulator changes the camera
-      values */
-    bool          modified      { true };
-  };
 
 
   // ------------------------------------------------------------------

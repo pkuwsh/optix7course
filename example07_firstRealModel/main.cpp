@@ -133,7 +133,7 @@ namespace osc {
 
       SampleWindow *window = new SampleWindow("Optix 7 Course Example",
                                               model,camera,worldScale);
-      window->run();
+      window->run_1(&(window->cameraFrame));
       
     } catch (std::runtime_error& e) {
       std::cout << GDT_TERMINAL_RED << "FATAL ERROR: " << e.what()
