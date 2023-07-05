@@ -143,30 +143,30 @@ namespace osc {
 #ifdef _WIN32
       // on windows, visual studio creates _two_ levels of build dir
       // (x86/Release)
-      "../../models/sponza.obj"
+      "../../models/CornellBox-Original.obj"
 #else
       // on linux, common practice is to have ONE level of build dir
       // (say, <project>/build/)...
-      "../models/sponza.obj"
+      "..CornellBox-Original.obj"
 #endif
-                             );
-      Camera camera = { /*from*/vec3f(-1293.07f, 154.681f, -0.7304f),
-                        /* at */model->bounds.center()-vec3f(0,400,0),
+                             );//模型导入
+      Camera camera = { /*from*/ vec3f(0.f, 1.f, 4.f),//vec3f(-1293.07f, 154.681f, -0.7304f),
+                        /* at */model->bounds.center()-vec3f(0,0,100),
                         /* up */vec3f(0.f,1.f,0.f) };
 
-      // some simple, hard-coded light ... obviously, only works for sponza
-      const float light_size = 200.f;
-      QuadLight light = { /* origin */ vec3f(-1000-light_size,800,-light_size),
+      // some simple, hard-coded light ... obviously, only works for sponza（光源的创建）
+      const float light_size = 0.5f;
+      QuadLight light = { /* origin */ vec3f(-light_size,1.5,-light_size),
                           /* edge 1 */ vec3f(2.f*light_size,0,0),
                           /* edge 2 */ vec3f(0,0,2.f*light_size),
-                          /* power */  vec3f(3000000.f) };
+                          /* power */  vec3f(30.f) };
                       
       // something approximating the scale of the world, so the
       // camera knows how much to move for any given user interaction:
       const float worldScale = length(model->bounds.span());
 
       SampleWindow *window = new SampleWindow("Optix 7 Course Example",
-                                              model,camera,light,worldScale);
+                                              model,camera,light,worldScale);//窗口的title
       window->enableFlyMode();
       
       std::cout << "Press 'a' to enable/disable accumulation/progressive refinement" << std::endl;

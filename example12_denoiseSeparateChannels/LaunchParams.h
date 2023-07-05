@@ -31,6 +31,8 @@ namespace osc {
     vec3f *normal;
     vec2f *texcoord;
     vec3i *index;
+	vec3f Kd;
+	vec3f Ks;
     bool                hasTexture;
     cudaTextureObject_t texture;
   };
