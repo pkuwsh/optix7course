@@ -39,7 +39,7 @@ namespace osc {
   
   struct LaunchParams
   {
-    int numPixelSamples = 1;
+    int numPixelSamples = 5;
     struct {
       int       frameID = 0;
       float4   *colorBuffer;
