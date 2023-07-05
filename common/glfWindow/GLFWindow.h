@@ -174,14 +174,14 @@ namespace osc {
   };
 
 
-
   // ------------------------------------------------------------------
   /*! abstract base class that allows to manipulate a renderable
     camera */
   struct CameraFrameManip {
     CameraFrameManip(CameraFrame *cameraFrame)
       : cameraFrame(cameraFrame)
-    {}
+    {
+    }
     
     /*! this gets called when the user presses a key on the keyboard ... */
     virtual void key(int key, int mods)
@@ -296,6 +296,7 @@ namespace osc {
     const float pixels_per_move           {  10.f };
   };
 
+  
 
   struct GLFCameraWindow : public GLFWindow {
     GLFCameraWindow(const std::string &title,

@@ -91,7 +91,30 @@ namespace osc {
     // glfwGetCursorPos(window,&x,&y);
     gw->mouseButton(button,action,mods);
   }
-  
+  int nframe = 0;
+  double  curtime = 0, lasttime = 0;
+  void ShowFrameRate(GLFWwindow* window)
+  {
+      char s[100] = { 0 };
+      curtime = glfwGetTime();
+      double delta = curtime - lasttime;
+      nframe++;
+
+      //vec3f pos = curCameraFrame->get_from();
+      //printf("%d %d %d\n", pos.x, pos.y, pos.z);
+      
+      if (delta>=1.0) {
+          sprintf(s, "final_project  FPS:%4.2f",
+              double(nframe)/delta);
+          
+          //printf("帧率为：%f\n", double(nframe) / delta);
+          glfwSetWindowTitle(window, s);
+          lasttime = curtime;
+          nframe = 0;
+      }
+  }
+
+
   void GLFWindow::run()
   {
     int width, height;
@@ -107,7 +130,7 @@ namespace osc {
     while (!glfwWindowShouldClose(handle)) {
       render();
       draw();
-        
+      ShowFrameRate(handle);//显示帧率
       glfwSwapBuffers(handle);
       glfwPollEvents();
     }
