@@ -156,10 +156,10 @@ namespace osc {
 
       // some simple, hard-coded light ... obviously, only works for sponza（光源的创建）
       const float light_size = 0.5f;
-      QuadLight light = { /* origin */ vec3f(-light_size,1.5,-light_size),
+      QuadLight light = { /* origin */ vec3f(-light_size,1.75,-light_size),
                           /* edge 1 */ vec3f(2.f*light_size,0,0),
                           /* edge 2 */ vec3f(0,0,2.f*light_size),
-                          /* power */  vec3f(30.f) };
+                          /* power */  vec3f(300.f) };
                       
       // something approximating the scale of the world, so the
       // camera knows how much to move for any given user interaction:
