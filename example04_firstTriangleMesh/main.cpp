@@ -106,7 +106,7 @@ namespace osc {
     std::vector<uint32_t> pixels;
   };
   
-  
+  SampleWindow* curSampleWindow;
   /*! main entry point to this example - initially optix, print hello
     world, then exit */
   extern "C" int main(int ac, char **av)

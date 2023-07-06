@@ -192,7 +192,7 @@ namespace osc {
     virtual void key(int key, int mods)
     {
       CameraFrame &fc = *cameraFrame;
-      
+      vec3f leftVector = vec3f(0, 0, 0);
       switch(key) {
       case '+':
       case '=':
@@ -225,12 +225,17 @@ namespace osc {
         break;
         /*增加键盘控制功能*/
       case GLFW_KEY_LEFT:
-          std::cout << "press left" << std::endl;
-          strafe(vec3f(1e-2, 0, 0) * fc.motionSpeed);
+          //strafe(vec3f(1e-2, 0, 0) * fc.motionSpeed);
+          //rotate(1e-4 * fc.motionSpeed, 0);
+          leftVector = cross(fc.get_up(), fc.get_at() - fc.get_from());
+          leftVector = leftVector/dot(leftVector, leftVector);
+          strafe(leftVector * fc.motionSpeed);
           break;
       case GLFW_KEY_RIGHT:
           std::cout << "press right" << std::endl;
-          strafe(vec3f(1e-2, 0, 0) * fc.motionSpeed * -1);
+          leftVector = cross(fc.get_up(), fc.get_at() - fc.get_from());
+          leftVector = leftVector / dot(leftVector, leftVector);
+          strafe(-leftVector * fc.motionSpeed);
           break;
       case GLFW_KEY_UP:
           std::cout << "press up" << std::endl;

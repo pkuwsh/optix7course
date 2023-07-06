@@ -16,7 +16,6 @@
 
 #include "GLFWindow.h"
 
-
 /*! \namespace osc - Optix Siggraph Course */
 namespace osc {
   using namespace gdt;
@@ -112,7 +111,6 @@ namespace osc {
               sprintf(s, "final_project  FPS:%4.2f",
                   double(nframe) / delta);
           }
-          
           
           //printf("Ö¡ÂÊÎª£º%f\n", double(nframe) / delta);
           glfwSetWindowTitle(window, s);
