@@ -47,6 +47,8 @@ mark_as_advanced(CUDA_SDK_ROOT_DIR)
 include_directories(${gdt_dir})
 add_subdirectory(${gdt_dir} EXCLUDE_FROM_ALL)
 
+
+
 # ------------------------------------------------------------------
 # build glfw
 # ------------------------------------------------------------------
@@ -60,7 +62,17 @@ else()
   find_package(glfw3 REQUIRED)
 endif()
 include_directories(common)
+
+
+
 add_subdirectory(common/glfWindow EXCLUDE_FROM_ALL)
+
+
+
+
+
+
+
 
 
 # ------------------------------------------------------------------
