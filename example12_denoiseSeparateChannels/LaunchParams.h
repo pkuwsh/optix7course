@@ -19,6 +19,9 @@
 #include "gdt/math/vec.h"
 #include "optix7.h"
 
+/* 最大光源数量 */
+#define MAX_LIGHT_NUM 8
+
 namespace osc {
   using namespace gdt;
 
@@ -31,13 +34,15 @@ namespace osc {
     vec3f *normal;
     vec2f *texcoord;
     vec3i *index;
+	vec3f Kd;
+	vec3f Ks;
     bool                hasTexture;
     cudaTextureObject_t texture;
   };
   
   struct LaunchParams
   {
-    int numPixelSamples = 1;
+    int numPixelSamples = 16;
     struct {
       int       frameID = 0;
       float4   *colorBuffer;
@@ -56,8 +61,11 @@ namespace osc {
     } camera;
 
     struct {
-      vec3f origin, du, dv, power;
-    } light;
+      vec3f origin, du, dv, power, color;
+    } light[MAX_LIGHT_NUM];
+
+    /* 当前光源数量 */
+    int lightNum = 1;
     
     OptixTraversableHandle traversable;
   };

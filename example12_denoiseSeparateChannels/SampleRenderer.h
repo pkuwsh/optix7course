@@ -21,6 +21,9 @@
 #include "LaunchParams.h"
 #include "Model.h"
 
+/* 最大可添加方块数量 */
+#define MAX_CUBE_NUM 16
+
 /*! \namespace osc - Optix Siggraph Course */
 namespace osc {
 
@@ -31,6 +34,31 @@ namespace osc {
     vec3f at;
     /*! general up-vector */
     vec3f up;
+  };
+
+  /*! SBT record for a raygen program */
+  struct __align__(OPTIX_SBT_RECORD_ALIGNMENT) RaygenRecord
+  {
+      __align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
+      // just a dummy value - later examples will use more interesting
+      // data here
+      void* data;
+  };
+
+  /*! SBT record for a miss program */
+  struct __align__(OPTIX_SBT_RECORD_ALIGNMENT) MissRecord
+  {
+      __align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
+      // just a dummy value - later examples will use more interesting
+      // data here
+      void* data;
+  };
+
+  /*! SBT record for a hitgroup program */
+  struct __align__(OPTIX_SBT_RECORD_ALIGNMENT) HitgroupRecord
+  {
+      __align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
+      TriangleMeshSBTData data;
   };
   
   /*! a sample OptiX-7 renderer that demonstrates how to set up
@@ -62,7 +90,13 @@ namespace osc {
     /* 添加方块 */
     OptixTraversableHandle updateAccel();
 
-    bool denoiserOn = true;
+    /* 修改新增方块的SBT(主要是color) */
+    void updateSBT(vec3f color);
+
+    /* 添加光源 */
+    void updateLight();
+    
+    bool denoiserOn = false;
     bool accumulate = true;
   protected:
 
@@ -141,13 +175,16 @@ namespace osc {
 
     /* 方块数量 */
     int cubeNums = 0;
-
-    /* buildinput所需参数设置为SampleRenderer的成员变量，以便之后进行update */
+    /* buildinput所需参数设置为SampleRenderer的成员变量，以便之后更新 */
     std::vector<OptixBuildInput> triangleInput;
     std::vector<CUdeviceptr> d_vertices;
     std::vector<CUdeviceptr> d_indices;
     std::vector<uint32_t> triangleInputFlags;
     CUDABuffer outputBuffer;
+    /* SBT Records 设置为成员变量，以便之后更新 */
+    std::vector<RaygenRecord> raygenRecords;
+    std::vector<MissRecord> missRecords;
+    std::vector<HitgroupRecord> hitgroupRecords;
 
     /*! @{ our launch parameters, on the host, and the buffer to store
         them on the device */
@@ -155,6 +192,10 @@ namespace osc {
     LaunchParams launchParams;
   protected:
     CUDABuffer   launchParamsBuffer;
+
+    /* 光源是否被修改 */
+    bool isLightUpdate = false; 
+
     /*! @} */
 
     /*! the color buffer we use during _rendering_, which is a bit

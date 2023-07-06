@@ -1,56 +1,14 @@
-// ======================================================================== //
-// Copyright 2018-2019 Ingo Wald                                            //
-//                                                                          //
-// Licensed under the Apache License, Version 2.0 (the "License");          //
-// you may not use this file except in compliance with the License.         //
-// You may obtain a copy of the License at                                  //
-//                                                                          //
-//     http://www.apache.org/licenses/LICENSE-2.0                           //
-//                                                                          //
-// Unless required by applicable law or agreed to in writing, software      //
-// distributed under the License is distributed on an "AS IS" BASIS,        //
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. //
-// See the License for the specific language governing permissions and      //
-// limitations under the License.                                           //
-// ======================================================================== //
+
 
 #include "SampleRenderer.h"
 #include "LaunchParams.h"
 // this include may only appear in a single source file:
 #include <optix_function_table_definition.h>
 
-#define MAX_CUBE_NUM 16
-
 /*! \namespace osc - Optix Siggraph Course */
 namespace osc {
 
   extern "C" char embedded_ptx_code[];
-
-  /*! SBT record for a raygen program */
-  struct __align__( OPTIX_SBT_RECORD_ALIGNMENT ) RaygenRecord
-  {
-    __align__( OPTIX_SBT_RECORD_ALIGNMENT ) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
-    // just a dummy value - later examples will use more interesting
-    // data here
-    void *data;
-  };
-
-  /*! SBT record for a miss program */
-  struct __align__( OPTIX_SBT_RECORD_ALIGNMENT ) MissRecord
-  {
-    __align__( OPTIX_SBT_RECORD_ALIGNMENT ) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
-    // just a dummy value - later examples will use more interesting
-    // data here
-    void *data;
-  };
-
-  /*! SBT record for a hitgroup program */
-  struct __align__( OPTIX_SBT_RECORD_ALIGNMENT ) HitgroupRecord
-  {
-    __align__( OPTIX_SBT_RECORD_ALIGNMENT ) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
-    TriangleMeshSBTData data;
-  };
-
 
   /*! constructor - performs all setup, including initializing
     optix, creates module, pipeline, programs, SBT, etc. */
@@ -59,10 +17,11 @@ namespace osc {
   {
     initOptix();
 
-    launchParams.light.origin = light.origin;
-    launchParams.light.du     = light.du;
-    launchParams.light.dv     = light.dv;
-    launchParams.light.power  = light.power;
+    launchParams.light[0].origin = light.origin;
+    launchParams.light[0].du     = light.du;
+    launchParams.light[0].dv     = light.dv;
+    launchParams.light[0].power  = light.power;
+    launchParams.light[0].color  = light.color;
 
     std::cout << "#osc: creating optix context ..." << std::endl;
     createContext();
@@ -152,7 +111,9 @@ namespace osc {
   OptixTraversableHandle SampleRenderer::buildAccel()
   {
     const int numMeshes = (int)model->meshes.size();
-    /*方块的数量*/
+    /* 先提前建立好MAX_CUBE_NUM个方块的Acceleration Structrue
+     * 之后添加方块的实现方式是修改对应的预先建立好的方块的属性值
+     */
     const int numCubes = MAX_CUBE_NUM;
     vertexBuffer.resize(numMeshes + numCubes);
     normalBuffer.resize(numMeshes + numCubes);
@@ -164,7 +125,7 @@ namespace osc {
     // ==================================================================
     // triangle inputs
     // ==================================================================
-    /* 添加方块的buildinput */
+
     triangleInput.resize(numMeshes + numCubes);
     d_vertices.resize(numMeshes + numCubes);
     d_indices.resize(numMeshes + numCubes);
@@ -172,11 +133,12 @@ namespace osc {
 
     for (int meshID = 0;meshID < numMeshes + numCubes;meshID++) {
         TriangleMesh mesh;
+        /* 属于模型的mesh */
         if (meshID < numMeshes) {
             // upload the model to the device: the builder
             mesh = *model->meshes[meshID];
         }
-        /* 方块的数据 */
+        /* 新增方块的数据，初始顶点都为0，所以不可见 */
         else {
             mesh.vertex = std::vector<vec3f>{
                 vec3f(0.0f, 0.0f, 0.0f),
@@ -241,106 +203,109 @@ namespace osc {
         triangleInput[meshID].triangleArray.sbtIndexOffsetSizeInBytes = 0;
         triangleInput[meshID].triangleArray.sbtIndexOffsetStrideInBytes = 0;
     }
-    
+
     // ==================================================================
     // BLAS setup
     // ==================================================================
-    
+
     /* 添加flag允许update和任意访问顶点数据 */
     OptixAccelBuildOptions accelOptions = {};
-    accelOptions.buildFlags             = OPTIX_BUILD_FLAG_ALLOW_COMPACTION
-      | OPTIX_BUILD_FLAG_ALLOW_UPDATE
-      | OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS
-      ;
-    accelOptions.motionOptions.numKeys  = 1;
-    accelOptions.operation              = OPTIX_BUILD_OPERATION_BUILD;
-    
+    accelOptions.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION
+        | OPTIX_BUILD_FLAG_ALLOW_UPDATE
+        | OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS
+        ;
+    accelOptions.motionOptions.numKeys = 1;
+    accelOptions.operation = OPTIX_BUILD_OPERATION_BUILD;
+
     OptixAccelBufferSizes blasBufferSizes;
     OPTIX_CHECK(optixAccelComputeMemoryUsage
-                (optixContext,
-                 &accelOptions,
-                 triangleInput.data(),
-                 (int)numMeshes + numCubes,  // num_build_inputs
-                 &blasBufferSizes
-                 ));
-    
+    (optixContext,
+        &accelOptions,
+        triangleInput.data(),
+        (int)numMeshes + numCubes,  // num_build_inputs
+        &blasBufferSizes
+    ));
+
     // ==================================================================
     // prepare compaction
     // ==================================================================
-    
+
     CUDABuffer compactedSizeBuffer;
     compactedSizeBuffer.alloc(sizeof(uint64_t));
-    
+
     OptixAccelEmitDesc emitDesc;
-    emitDesc.type   = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+    emitDesc.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
     emitDesc.result = compactedSizeBuffer.d_pointer();
-    
+
     // ==================================================================
     // execute build (main stage)
     // ==================================================================
-    
+
     CUDABuffer tempBuffer;
     tempBuffer.alloc(blasBufferSizes.tempSizeInBytes);
-    
+
     outputBuffer.alloc(blasBufferSizes.outputSizeInBytes);
-      
+
     OPTIX_CHECK(optixAccelBuild(optixContext,
-                                /* stream */0,
-                                &accelOptions,
-                                triangleInput.data(),
-                                (int)numMeshes + numCubes,
-                                tempBuffer.d_pointer(),
-                                tempBuffer.sizeInBytes,
-                                
-                                outputBuffer.d_pointer(),
-                                outputBuffer.sizeInBytes,
-                                
-                                &asHandle,
-                                
-                                &emitDesc,1
-                                ));
+        /* stream */0,
+        &accelOptions,
+        triangleInput.data(),
+        (int)numMeshes + numCubes,
+        tempBuffer.d_pointer(),
+        tempBuffer.sizeInBytes,
+
+        outputBuffer.d_pointer(),
+        outputBuffer.sizeInBytes,
+
+        &asHandle,
+
+        &emitDesc, 1
+    ));
     CUDA_SYNC_CHECK();
 
     /*-------------------------------------*/
-    
+
     // ==================================================================
     // perform compaction
     // ==================================================================
     uint64_t compactedSize;
-    compactedSizeBuffer.download(&compactedSize,1);
-    
+    compactedSizeBuffer.download(&compactedSize, 1);
+
     asBuffer.alloc(compactedSize);
     OPTIX_CHECK(optixAccelCompact(optixContext,
-                                  /*stream:*/0,
-                                  asHandle,
-                                  asBuffer.d_pointer(),
-                                  asBuffer.sizeInBytes,
-                                  &asHandle));
+        /*stream:*/0,
+        asHandle,
+        asBuffer.d_pointer(),
+        asBuffer.sizeInBytes,
+        &asHandle));
     CUDA_SYNC_CHECK();
-    
+
     // ==================================================================
     // aaaaaand .... clean up
     // ==================================================================
     // outputBuffer.free(); // << the UNcompacted, temporary output buffer
     tempBuffer.free();
     compactedSizeBuffer.free();
-    
+
     return asHandle;
   }
 
   /* 添加方块 */
   OptixTraversableHandle SampleRenderer::updateAccel()
   {
-      vec3f center;
-      float edgeLength;
+      vec3f center, color; // 方块中心坐标和方块颜色
+      float edgeLength;    // 方块边长
       printf("Please enter the center coordinates and edge length of the cube:\n");
       scanf("%f%f%f%f", &center.x, &center.y, &center.z, &edgeLength);
+      printf("Please enter the color of the cube:\n");
+      scanf("%f%f%f", &color.x, &color.y, &color.z);
+      updateSBT(color);    // 更新方块颜色
       const int numMeshes = (int)model->meshes.size();
       const int numCubes = MAX_CUBE_NUM;
-      /* 方块的数量 */
+      /* 方块的数量+1 */
       cubeNums++;
       printf("Current cube number: %d\n", cubeNums);
-      if (cubeNums > MAX_CUBE_NUM) {
+      if (cubeNums > MAX_CUBE_NUM) { // 方块数超过上限
           printf("The number of cubes has reached the upper limit.\n");
           return 0;
       }
@@ -348,6 +313,9 @@ namespace osc {
       // ==================================================================
       // triangle inputs
       // ==================================================================
+
+      /* 更新对应方块的顶点坐标，上传到buffer中，然后调用optixBuildAccel进行update */
+
       TriangleMesh mesh;
       mesh.vertex = std::vector<vec3f>{
                   center + vec3f(-1.0, -1.0, -1.0) * edgeLength / 2,
@@ -374,7 +342,7 @@ namespace osc {
           | OPTIX_BUILD_FLAG_ALLOW_UPDATE
           ;
       accelOptions.motionOptions.numKeys = 1;
-      accelOptions.operation = OPTIX_BUILD_OPERATION_UPDATE;
+      accelOptions.operation = OPTIX_BUILD_OPERATION_UPDATE; // 操作为update
 
       OptixAccelBufferSizes blasBufferSizes;
       OPTIX_CHECK(optixAccelComputeMemoryUsage
@@ -447,7 +415,6 @@ namespace osc {
 
       return asHandle;
   }
-
   
   /*! helper function that initializes optix and checks for errors */
   void SampleRenderer::initOptix()
@@ -509,7 +476,7 @@ namespace osc {
     single .cu file, using a single embedded ptx string */
   void SampleRenderer::createModule()
   {
-    moduleCompileOptions.maxRegisterCount  = 50;
+    moduleCompileOptions.maxRegisterCount  = 0;
     moduleCompileOptions.optLevel          = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
     moduleCompileOptions.debugLevel        = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
 
@@ -520,11 +487,8 @@ namespace osc {
     pipelineCompileOptions.numAttributeValues = 2;
     pipelineCompileOptions.exceptionFlags     = OPTIX_EXCEPTION_FLAG_NONE;
     pipelineCompileOptions.pipelineLaunchParamsVariableName = "optixLaunchParams";
-    pipelineCompileOptions.usesPrimitiveTypeFlags =
-        OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE
-        ;
       
-    pipelineLinkOptions.maxTraceDepth          = 2;
+    pipelineLinkOptions.maxTraceDepth          = 5;
       
     const std::string ptxCode = embedded_ptx_code;
       
@@ -624,7 +588,7 @@ namespace osc {
     OptixProgramGroupDesc    pgDesc     = {};
     pgDesc.kind                         = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
     pgDesc.hitgroup.moduleCH            = module;           
-    pgDesc.hitgroup.moduleAH            = module;        
+    pgDesc.hitgroup.moduleAH            = module;           
 
     // -------------------------------------------------------
     // radiance rays
@@ -709,7 +673,6 @@ namespace osc {
     // ------------------------------------------------------------------
     // build raygen records
     // ------------------------------------------------------------------
-    std::vector<RaygenRecord> raygenRecords;
     for (int i=0;i<raygenPGs.size();i++) {
       RaygenRecord rec;
       OPTIX_CHECK(optixSbtRecordPackHeader(raygenPGs[i],&rec));
@@ -722,7 +685,6 @@ namespace osc {
     // ------------------------------------------------------------------
     // build miss records
     // ------------------------------------------------------------------
-    std::vector<MissRecord> missRecords;
     for (int i=0;i<missPGs.size();i++) {
       MissRecord rec;
       OPTIX_CHECK(optixSbtRecordPackHeader(missPGs[i],&rec));
@@ -738,7 +700,6 @@ namespace osc {
     // build hitgroup records
     // ------------------------------------------------------------------
     int numObjects = (int)model->meshes.size();
-    std::vector<HitgroupRecord> hitgroupRecords;
     for (int meshID=0;meshID<numObjects;meshID++) {
       for (int rayID=0;rayID<RAY_TYPE_COUNT;rayID++) {
         auto mesh = model->meshes[meshID];
@@ -752,6 +713,13 @@ namespace osc {
         } else {
           rec.data.hasTexture = false;
         }
+
+
+		rec.data.Kd = mesh->diffuse;
+		if (rec.data.Kd == vec3f(0.0)) rec.data.Kd = vec3f(1.0);
+		rec.data.Ks = mesh->specular;
+
+
         rec.data.index    = (vec3i*)indexBuffer[meshID].d_pointer();
         rec.data.vertex   = (vec3f*)vertexBuffer[meshID].d_pointer();
         rec.data.normal   = (vec3f*)normalBuffer[meshID].d_pointer();
@@ -759,14 +727,19 @@ namespace osc {
         hitgroupRecords.push_back(rec);
       }
     }
-    /* 方块的SBT record */
+
+    /* 方块的SBT records */
     const int numCubes = MAX_CUBE_NUM;
     for (int meshID = numObjects;meshID < numObjects + numCubes;meshID++) {
         for (int rayID = 0;rayID < RAY_TYPE_COUNT;rayID++) {
             HitgroupRecord rec;
             OPTIX_CHECK(optixSbtRecordPackHeader(hitgroupPGs[rayID], &rec));
-            rec.data.color = vec3f(1.0f, 0.0f, 0.0f);
+            rec.data.color = vec3f(1.0f);
             rec.data.hasTexture = false;
+
+            rec.data.Kd = vec3f(0.5f);
+            rec.data.Ks = vec3f(0.5f);
+
             rec.data.index = (vec3i*)indexBuffer[meshID].d_pointer();
             rec.data.vertex = (vec3f*)vertexBuffer[meshID].d_pointer();
             rec.data.normal = (vec3f*)normalBuffer[meshID].d_pointer();
@@ -781,7 +754,38 @@ namespace osc {
     sbt.hitgroupRecordCount         = (int)hitgroupRecords.size();
   }
 
+  /* 更新方块颜色 */
+  void SampleRenderer::updateSBT(vec3f color = vec3f(1.0f)) {
+      hitgroupRecords[(int)model->meshes.size() * RAY_TYPE_COUNT + cubeNums].data.color = color;
+      hitgroupRecordsBuffer.upload(hitgroupRecords.data(), hitgroupRecords.size());
+      sbt.hitgroupRecordBase = hitgroupRecordsBuffer.d_pointer();
+      sbt.hitgroupRecordStrideInBytes = sizeof(HitgroupRecord);
+      sbt.hitgroupRecordCount = (int)hitgroupRecords.size();
+  }
 
+  /* 添加光源 */
+  void SampleRenderer::updateLight() {
+      vec3f origin, du, dv, color;
+      float power;
+      printf("Please enter light origin(vec3f):\n");
+      scanf("%f%f%f", &origin.x, &origin.y, &origin.z);
+      printf("Please enter light edge1(vec3f):\n");
+      scanf("%f%f%f", &du.x, &du.y, &du.z);
+      printf("Please enter light edge2(vec3f):\n");
+      scanf("%f%f%f", &dv.x, &dv.y, &dv.z);
+      printf("Please enter light power(float):\n");
+      scanf("%f", &power);
+      printf("Please enter light color(vec3f):\n");
+      scanf("%f%f%f", &color.x, &color.y, &color.z);
+      int lightIdx = launchParams.lightNum;
+      launchParams.light[lightIdx].origin = origin;
+      launchParams.light[lightIdx].du = du;
+      launchParams.light[lightIdx].dv = dv;
+      launchParams.light[lightIdx].power = vec3f(power);
+      launchParams.light[lightIdx].color = color;
+      launchParams.lightNum++;
+      isLightUpdate = true;
+  }
 
   /*! render one frame */
   void SampleRenderer::render()
